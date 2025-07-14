@@ -1,181 +1,162 @@
-import streamlit as st
-import pandas as pd
-from fpdf import FPDF
-import io
+import streamlit as st import pandas as pd import sqlite3 import io from fpdf import FPDF
 
-# إعداد الصفحة
-st.set_page_config(page_title="📊 نظام إدارة المدرسة", layout="wide")
+إعداد الاتصال بقاعدة البيانات
 
-# ---- تسجيل الدخول ----
-def login():
-    st.title("🔐 تسجيل الدخول")
+conn = sqlite3.connect("school.db", check_same_thread=False) cursor = conn.cursor()
 
-    with st.form("login_form"):
-        username = st.text_input("👤 اسم المستخدم")
-        password = st.text_input("🔑 كلمة المرور", type="password")
-        role = st.selectbox("🧾 اختر الدور", ["مدير", "معلم"])
-        submit = st.form_submit_button("🔓 دخول")
+def create_tables(): cursor.execute(""" CREATE TABLE IF NOT EXISTS students ( student_id TEXT PRIMARY KEY, name TEXT, email TEXT, class_name TEXT ) """) cursor.execute(""" CREATE TABLE IF NOT EXISTS teachers ( teacher_id TEXT PRIMARY KEY, name TEXT, subject TEXT ) """) cursor.execute(""" CREATE TABLE IF NOT EXISTS grades ( id INTEGER PRIMARY KEY AUTOINCREMENT, student_id TEXT, subject TEXT, grade REAL ) """) cursor.execute(""" CREATE TABLE IF NOT EXISTS classes ( class_id TEXT PRIMARY KEY, class_name TEXT, grade_level TEXT ) """) cursor.execute(""" CREATE TABLE IF NOT EXISTS timetable ( id INTEGER PRIMARY KEY AUTOINCREMENT, day TEXT, period TEXT, subject TEXT, class_name TEXT, teacher TEXT ) """) conn.commit()
 
-        if submit:
-            if (username == "admin" and password == "1234" and role == "مدير") or \
-               (username == "teacher" and password == "0000" and role == "معلم"):
-                st.session_state.logged_in = True
-                st.session_state.role = role
-                st.success(f"✅ تم تسجيل الدخول كـ {role}")
-            else:
-                st.error("❌ اسم المستخدم أو كلمة المرور غير صحيحة.")
+create_tables()
 
-# التحقق من حالة الجلسة
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-if "role" not in st.session_state:
-    st.session_state.role = ""
+st.set_page_config(page_title="نظام إدارة المدرسة", layout="wide") st.sidebar.title("📚 قائمة الصفحات") page = st.sidebar.selectbox("اختر الصفحة", ["👨‍🎓 الطلاب", "👨‍🏫 المعلمون", "📝 العلامات", "📚 الصفوف", "📅 جدول الحصص"])
 
-if not st.session_state.logged_in:
-    login()
-    st.stop()
+---- دوال الطلاب ----
 
-# ---- تهيئة البيانات ----
-if "students" not in st.session_state:
-    st.session_state.students = pd.DataFrame(columns=["student_id", "name", "email", "class_name"])
-if "teachers" not in st.session_state:
-    st.session_state.teachers = pd.DataFrame(columns=["teacher_id", "name", "subject"])
-if "grades" not in st.session_state:
-    st.session_state.grades = pd.DataFrame(columns=["student_id", "subject", "grade"])
-if "classes" not in st.session_state:
-    st.session_state.classes = pd.DataFrame(columns=["class_id", "class_name", "grade_level"])
-if "timetable" not in st.session_state:
-    st.session_state.timetable = pd.DataFrame(columns=["day", "period", "subject", "class_name", "teacher"])
+def get_students(): return pd.read_sql_query("SELECT * FROM students", conn)
 
-# ---- اختيار الصفحة ----
-if st.session_state.role == "مدير":
-    page = st.sidebar.radio("📘 انتقل إلى:", ["👨‍🎓 الطلاب", "👨‍🏫 المعلمون", "📝 العلامات", "📚 الصفوف", "📅 جدول الحصص"])
-else:
-    page = st.sidebar.radio("📘 انتقل إلى:", ["📝 العلامات", "📅 جدول الحصص"])
+def add_student(student_id, name, email, class_name): cursor.execute( "INSERT OR IGNORE INTO students (student_id, name, email, class_name) VALUES (?, ?, ?, ?)", (student_id, name, email, class_name) ) conn.commit()
 
-# ---- 👨‍🎓 الطلاب ----
-if page == "👨‍🎓 الطلاب":
-    st.title("👨‍🎓 إدارة الطلاب")
+---- دوال المعلمين ----
 
-    with st.form("student_form"):
-        student_id = st.text_input("🆔 رقم الطالب")
-        student_name = st.text_input("👤 اسم الطالب")
-        student_email = st.text_input("📧 البريد الإلكتروني")
-        class_options = st.session_state.classes["class_name"].tolist() if not st.session_state.classes.empty else []
-        student_class = st.selectbox("📘 اختر الصف", class_options if class_options else ["لا توجد صفوف"])
-        submit_student = st.form_submit_button("📥 حفظ الطالب")
+def get_teachers(): return pd.read_sql_query("SELECT * FROM teachers", conn)
 
-        if submit_student and student_id and student_name:
-            new_student = {"student_id": student_id, "name": student_name, "email": student_email, "class_name": student_class}
-            st.session_state.students = pd.concat([st.session_state.students, pd.DataFrame([new_student])], ignore_index=True)
-            st.success("✅ تم حفظ الطالب!")
+def add_teacher(teacher_id, name, subject): cursor.execute( "INSERT OR IGNORE INTO teachers (teacher_id, name, subject) VALUES (?, ?, ?)", (teacher_id, name, subject) ) conn.commit()
 
-    st.subheader("📋 قائمة الطلاب")
-    st.dataframe(st.session_state.students, use_container_width=True)
+---- دوال العلامات ----
 
-    if not st.session_state.students.empty:
-        def generate_pdf(dataframe):
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Arial", size=12)
-            pdf.cell(200, 10, txt="قائمة الطلاب", ln=True, align="C")
-            pdf.ln(10)
-            pdf.multi_cell(0, 10, " | ".join(dataframe.columns.tolist()))
-            for _, row in dataframe.iterrows():
-                pdf.multi_cell(0, 10, " | ".join(str(val) for val in row.values))
-            output = io.BytesIO()
-            pdf.output(output)
-            return output.getvalue()
+def get_grades(): return pd.read_sql_query("SELECT * FROM grades", conn)
 
-        pdf_bytes = generate_pdf(st.session_state.students)
-        st.download_button("⬇️ تحميل معلومات الطلاب PDF", data=pdf_bytes, file_name="students_list.pdf", mime="application/pdf")
+def add_grade(student_id, subject, grade): cursor.execute( "INSERT INTO grades (student_id, subject, grade) VALUES (?, ?, ?)", (student_id, subject, grade) ) conn.commit()
 
-# ---- 👨‍🏫 المعلمون ----
-elif page == "👨‍🏫 المعلمون":
-    st.title("👨‍🏫 إدارة المعلمين")
+---- دوال الصفوف ----
 
-    with st.form("teacher_form"):
-        teacher_id = st.text_input("🆔 رقم المعلم")
-        teacher_name = st.text_input("👨‍🏫 اسم المعلم")
-        subject = st.text_input("📘 المادة")
-        submit_teacher = st.form_submit_button("📥 حفظ المعلم")
+def get_classes(): return pd.read_sql_query("SELECT * FROM classes", conn)
 
-        if submit_teacher and teacher_id and teacher_name:
-            new_teacher = {"teacher_id": teacher_id, "name": teacher_name, "subject": subject}
-            st.session_state.teachers = pd.concat([st.session_state.teachers, pd.DataFrame([new_teacher])], ignore_index=True)
-            st.success("✅ تم حفظ المعلم!")
+def add_class(class_id, class_name, grade_level): cursor.execute( "INSERT OR IGNORE INTO classes (class_id, class_name, grade_level) VALUES (?, ?, ?)", (class_id, class_name, grade_level) ) conn.commit()
 
-    st.subheader("📋 قائمة المعلمين")
-    st.dataframe(st.session_state.teachers, use_container_width=True)
+---- دوال جدول الحصص ----
 
-# ---- 📝 العلامات ----
-elif page == "📝 العلامات":
-    st.title("📝 تسجيل العلامات")
+def get_timetable(): return pd.read_sql_query("SELECT * FROM timetable", conn)
 
-    with st.form("grades_form"):
-        student_id = st.selectbox("👨‍🎓 اختر الطالب", st.session_state.students["student_id"] if not st.session_state.students.empty else [])
-        subject = st.text_input("📘 المادة")
-        grade = st.number_input("🔢 العلامة", min_value=0.0, max_value=100.0)
-        submit_grade = st.form_submit_button("📥 حفظ العلامة")
+def add_schedule(day, period, subject, class_name, teacher): cursor.execute( "INSERT INTO timetable (day, period, subject, class_name, teacher) VALUES (?, ?, ?, ?, ?)", (day, period, subject, class_name, teacher) ) conn.commit()
 
-        if submit_grade and student_id and subject:
-            new_grade = {"student_id": student_id, "subject": subject, "grade": grade}
-            st.session_state.grades = pd.concat([st.session_state.grades, pd.DataFrame([new_grade])], ignore_index=True)
-            st.success("✅ تم حفظ العلامة!")
+---- 👨‍🎓 الطلاب ----
 
-    st.subheader("📋 جدول العلامات")
-    st.dataframe(st.session_state.grades, use_container_width=True)
+if page == "👨‍🎓 الطلاب": st.title("👨‍🎓 إدارة الطلاب")
 
-    if not st.session_state.grades.empty:
-        st.download_button(
-            "⬇️ تحميل العلامات Excel",
-            data=st.session_state.grades.to_excel(index=False, engine="openpyxl"),
-            file_name="grades.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+with st.form("student_form"):
+    student_id = st.text_input("🆔 رقم الطالب")
+    student_name = st.text_input("👤 اسم الطالب")
+    student_email = st.text_input("📧 البريد الإلكتروني")
+    class_df = get_classes()
+    class_options = class_df["class_name"].tolist() if not class_df.empty else []
+    student_class = st.selectbox("📘 اختر الصف", class_options if class_options else ["لا توجد صفوف"])
+    submit_student = st.form_submit_button("📥 حفظ الطالب")
 
-# ---- 📚 الصفوف ----
-elif page == "📚 الصفوف":
-    st.title("📚 إدارة الصفوف")
+    if submit_student and student_id and student_name:
+        add_student(student_id, student_name, student_email, student_class)
+        st.success("✅ تم حفظ الطالب!")
 
-    with st.form("class_form"):
-        class_id = st.text_input("🆔 رقم الصف")
-        class_name = st.text_input("🏷️ اسم الصف")
-        grade_level = st.selectbox("📘 المرحلة", ["رياض أطفال", "ابتدائي", "إعدادي", "ثانوي"])
-        submit_class = st.form_submit_button("📥 حفظ الصف")
+st.subheader("📋 قائمة الطلاب")
+students_df = get_students()
+st.dataframe(students_df, use_container_width=True)
 
-        if submit_class and class_id and class_name:
-            new_class = {"class_id": class_id, "class_name": class_name, "grade_level": grade_level}
-            st.session_state.classes = pd.concat([st.session_state.classes, pd.DataFrame([new_class])], ignore_index=True)
-            st.success("✅ تم حفظ الصف!")
+if not students_df.empty:
+    def generate_pdf(dataframe):
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+        pdf.cell(200, 10, txt="قائمة الطلاب", ln=True, align="C")
+        pdf.ln(10)
+        pdf.multi_cell(0, 10, " | ".join(dataframe.columns.tolist()))
+        for _, row in dataframe.iterrows():
+            pdf.multi_cell(0, 10, " | ".join(str(val) for val in row.values))
+        output = io.BytesIO()
+        pdf.output(output)
+        return output.getvalue()
 
-    st.subheader("📋 قائمة الصفوف")
-    st.dataframe(st.session_state.classes, use_container_width=True)
+    pdf_bytes = generate_pdf(students_df)
+    st.download_button("⬇️ تحميل معلومات الطلاب PDF", data=pdf_bytes, file_name="students_list.pdf", mime="application/pdf")
 
-# ---- 📅 جدول الحصص ----
-elif page == "📅 جدول الحصص":
-    st.title("📅 إدارة جدول الحصص")
+---- 👨‍🏫 المعلمون ----
 
-    with st.form("timetable_form"):
-        day = st.selectbox("📆 اليوم", ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس"])
-        period = st.selectbox("⏰ الحصة", [f"الحصة {i}" for i in range(1, 9)])
-        subject = st.text_input("📘 المادة")
-        class_name = st.selectbox("🏷️ الصف", st.session_state.classes["class_name"] if not st.session_state.classes.empty else ["لا توجد"])
-        teacher = st.selectbox("👨‍🏫 المعلم", st.session_state.teachers["name"] if not st.session_state.teachers.empty else ["لا يوجد"])
-        submit_tt = st.form_submit_button("📥 حفظ الحصة")
+elif page == "👨‍🏫 المعلمون": st.title("👨‍🏫 إدارة المعلمين")
 
-        if submit_tt and subject:
-            new_tt = {"day": day, "period": period, "subject": subject, "class_name": class_name, "teacher": teacher}
-            st.session_state.timetable = pd.concat([st.session_state.timetable, pd.DataFrame([new_tt])], ignore_index=True)
-            st.success("✅ تم حفظ الحصة!")
+with st.form("teacher_form"):
+    teacher_id = st.text_input("🆔 رقم المعلم")
+    teacher_name = st.text_input("👤 اسم المعلم")
+    teacher_subject = st.text_input("📘 المادة")
+    submit_teacher = st.form_submit_button("📥 حفظ المعلم")
 
-    st.subheader("📋 جدول الحصص")
-    st.dataframe(st.session_state.timetable, use_container_width=True)
+    if submit_teacher and teacher_id and teacher_name:
+        add_teacher(teacher_id, teacher_name, teacher_subject)
+        st.success("✅ تم حفظ المعلم!")
 
-    if not st.session_state.timetable.empty:
-        st.download_button(
-            "⬇️ تحميل جدول الحصص Excel",
-            data=st.session_state.timetable.to_excel(index=False, engine="openpyxl"),
-            file_name="timetable.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+st.subheader("📋 قائمة المعلمين")
+teachers_df = get_teachers()
+st.dataframe(teachers_df, use_container_width=True)
+
+---- 📝 العلامات ----
+
+elif page == "📝 العلامات": st.title("📝 إدارة العلامات")
+
+student_df = get_students()
+student_ids = student_df["student_id"].tolist()
+
+with st.form("grade_form"):
+    student_id = st.selectbox("👤 اختر الطالب", student_ids)
+    subject = st.text_input("📘 المادة")
+    grade = st.number_input("🧮 العلامة", min_value=0.0, max_value=100.0, step=0.5)
+    submit_grade = st.form_submit_button("📥 حفظ العلامة")
+
+    if submit_grade and student_id and subject:
+        add_grade(student_id, subject, grade)
+        st.success("✅ تم حفظ العلامة!")
+
+st.subheader("📊 جميع العلامات")
+grades_df = get_grades()
+st.dataframe(grades_df, use_container_width=True)
+
+---- 📚 الصفوف ----
+
+elif page == "📚 الصفوف": st.title("📚 إدارة الصفوف")
+
+with st.form("class_form"):
+    class_id = st.text_input("🆔 رقم الصف")
+    class_name = st.text_input("📘 اسم الصف")
+    grade_level = st.text_input("📏 المرحلة الدراسية")
+    submit_class = st.form_submit_button("📥 حفظ الصف")
+
+    if submit_class and class_id and class_name:
+        add_class(class_id, class_name, grade_level)
+        st.success("✅ تم حفظ الصف!")
+
+st.subheader("📋 قائمة الصفوف")
+classes_df = get_classes()
+st.dataframe(classes_df, use_container_width=True)
+
+---- 📅 جدول الحصص ----
+
+elif page == "📅 جدول الحصص": st.title("📅 جدول الحصص")
+
+class_df = get_classes()
+class_names = class_df["class_name"].tolist()
+teacher_df = get_teachers()
+teacher_names = teacher_df["name"].tolist()
+
+with st.form("timetable_form"):
+    day = st.selectbox("🗓️ اليوم", ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس"])
+    period = st.selectbox("⏰ الحصة", [f"الحصة {i}" for i in range(1, 8)])
+    subject = st.text_input("📘 المادة")
+    class_name = st.selectbox("📚 الصف", class_names if class_names else ["لا توجد صفوف"])
+    teacher = st.selectbox("👨‍🏫 المعلم", teacher_names if teacher_names else ["لا يوجد معلمين"])
+    submit_tt = st.form_submit_button("📥 حفظ الجدول")
+
+    if submit_tt:
+        add_schedule(day, period, subject, class_name, teacher)
+        st.success("✅ تم حفظ الجدول!")
+
+st.subheader("📋 جدول الحصص")
+timetable_df = get_timetable()
+st.dataframe(timetable_df, use_container_width=True)
+
