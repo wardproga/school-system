@@ -3,25 +3,28 @@ import pandas as pd
 
 # إعداد الصفحة
 st.set_page_config(page_title="📘 نظام إدارة المدرسة", layout="centered")
-st.title("🏫 نظام إدارة المدرسة")
 
 # ----------------------------
-# تخزين بيانات الطلاب مؤقتًا
+# تهيئة البيانات في session_state
 if "students" not in st.session_state:
     st.session_state.students = pd.DataFrame(columns=["student_id", "name", "email"])
 
-# تخزين بيانات المعلمين مؤقتًا
 if "teachers" not in st.session_state:
     st.session_state.teachers = pd.DataFrame(columns=["teacher_id", "name", "email"])
 
-# ----------------------------
-# تبويبات رئيسية
-tab1, tab2 = st.tabs(["👨‍🎓 الطلاب", "👨‍🏫 المعلمون"])
+if "grades" not in st.session_state:
+    st.session_state.grades = pd.DataFrame(columns=["student", "subject", "grade", "term"])
 
 # ----------------------------
-# واجهة الطلاب
-with tab1:
-    st.subheader("➕ إضافة طالب جديد")
+# الشريط الجانبي للتنقل
+st.sidebar.title("📘 القائمة")
+page = st.sidebar.radio("انتقل إلى:", ["👨‍🎓 الطلاب", "👨‍🏫 المعلمون", "📝 العلامات"])
+
+# ----------------------------
+# 👨‍🎓 تبويب الطلاب
+if page == "👨‍🎓 الطلاب":
+    st.title("👨‍🎓 إدارة الطلاب")
+
     with st.form("student_form"):
         student_id = st.text_input("🔢 رقم الطالب")
         student_name = st.text_input("👤 اسم الطالب")
@@ -43,12 +46,13 @@ with tab1:
     st.dataframe(st.session_state.students, use_container_width=True)
 
 # ----------------------------
-# واجهة المعلمين
-with tab2:
-    st.subheader("➕ إضافة معلم جديد")
+# 👨‍🏫 تبويب المعلمين
+elif page == "👨‍🏫 المعلمون":
+    st.title("👨‍🏫 إدارة المعلمين")
+
     with st.form("teacher_form"):
         teacher_id = st.text_input("🔢 رقم المعلم")
-        teacher_name = st.text_input("👨‍🏫 اسم المعلم")
+        teacher_name = st.text_input("👤 اسم المعلم")
         teacher_email = st.text_input("📧 البريد الإلكتروني")
 
         submit_teacher = st.form_submit_button("📥 حفظ المعلم")
@@ -65,3 +69,36 @@ with tab2:
 
     st.subheader("📋 قائمة المعلمين")
     st.dataframe(st.session_state.teachers, use_container_width=True)
+
+# ----------------------------
+# 📝 تبويب تسجيل العلامات
+elif page == "📝 العلامات":
+    st.title("📝 تسجيل العلامات")
+
+    if st.session_state.students.empty:
+        st.warning("⚠️ لا يوجد طلاب مسجلين بعد.")
+    else:
+        student_names = st.session_state.students["name"].tolist()
+
+        with st.form("grade_form"):
+            student = st.selectbox("👨‍🎓 اختر الطالب", student_names)
+            subject = st.text_input("📚 اسم المادة")
+            grade = st.number_input("💯 العلامة", min_value=0.0, max_value=100.0, step=0.5)
+            term = st.selectbox("📆 الفصل الدراسي", ["الأول", "الثاني"])
+
+            submit_grade = st.form_submit_button("📥 حفظ العلامة")
+            if submit_grade:
+                new_grade = {
+                    "student": student,
+                    "subject": subject,
+                    "grade": grade,
+                    "term": term
+                }
+                st.session_state.grades = pd.concat(
+                    [st.session_state.grades, pd.DataFrame([new_grade])],
+                    ignore_index=True
+                )
+                st.success("✅ تم تسجيل العلامة!")
+
+        st.subheader("📊 جدول العلامات")
+        st.dataframe(st.session_state.grades, use_container_width=True)
