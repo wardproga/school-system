@@ -1,94 +1,184 @@
-import streamlit as st import pandas as pd import sqlite3 import io from fpdf import FPDF
+import streamlit as st
+import sqlite3
+import pandas as pd
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import io
+import base64
+from datetime import datetime
 
-إعداد الاتصال بقاعدة البيانات
+# الاتصال بقاعدة البيانات
+conn = sqlite3.connect("school.db")
+cursor = conn.cursor()
 
-conn = sqlite3.connect("school.db", check_same_thread=False) cursor = conn.cursor()
+# إعداد الصفحة
+st.set_page_config(page_title="نظام إدارة المدرسة", page_icon="🏫", layout="wide")
 
-def create_tables(): cursor.execute(""" CREATE TABLE IF NOT EXISTS students ( student_id TEXT PRIMARY KEY, name TEXT, email TEXT, class_name TEXT ) """) cursor.execute(""" CREATE TABLE IF NOT EXISTS teachers ( teacher_id TEXT PRIMARY KEY, name TEXT, subject TEXT ) """) cursor.execute(""" CREATE TABLE IF NOT EXISTS grades ( id INTEGER PRIMARY KEY AUTOINCREMENT, student_id TEXT, subject TEXT, grade REAL ) """) cursor.execute(""" CREATE TABLE IF NOT EXISTS classes ( class_id TEXT PRIMARY KEY, class_name TEXT, grade_level TEXT ) """) cursor.execute(""" CREATE TABLE IF NOT EXISTS timetable ( id INTEGER PRIMARY KEY AUTOINCREMENT, day TEXT, period TEXT, subject TEXT, class_name TEXT, teacher TEXT ) """) cursor.execute(""" CREATE TABLE IF NOT EXISTS parents ( parent_id TEXT PRIMARY KEY, name TEXT, email TEXT ) """) cursor.execute(""" CREATE TABLE IF NOT EXISTS parent_student ( parent_id TEXT, student_id TEXT, PRIMARY KEY (parent_id, student_id) ) """) conn.commit()
+# --- واجهة ترحيبية وشريط تنقل علوي ---
+st.markdown(
+    """
+    <style>
+    .main-title {
+        font-size: 38px;
+        color: #0e4b75;
+        font-weight: bold;
+        text-align: center;
+        margin-bottom: 15px;
+    }
+    .nav-bar {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 25px;
+        gap: 20px;
+    }
+    .nav-button {
+        background-color: #0e4b75;
+        color: white;
+        padding: 8px 20px;
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: bold;
+    }
+    .nav-button:hover {
+        background-color: #1267a0;
+    }
+    </style>
 
-create_tables()
+    <div class="main-title">📘 نظام إدارة المدرسة</div>
+    <div class="nav-bar">
+        <a href="#📥-إضافة-طالب" class="nav-button">الطلاب</a>
+        <a href="#👩‍🏫-إدارة-المعلمين" class="nav-button">المعلمون</a>
+        <a href="#📊-إدارة-العلامات" class="nav-button">العلامات</a>
+        <a href="#🗓️-جدول-الحصص" class="nav-button">الحصص</a>
+        <a href="#✉️-إرسال-إشعار" class="nav-button">الإشعارات</a>
+        <a href="#📤-تحميل-التقارير" class="nav-button">التقارير</a>
+        <a href="#ℹ️-حول" class="nav-button">حول</a>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
-st.set_page_config(page_title="نظام إدارة المدرسة", layout="wide") st.sidebar.title("📚 قائمة الصفحات") page = st.sidebar.selectbox("اختر الصفحة", ["👨‍🎓 الطلاب", "👨‍🏫 المعلمون", "📝 العلامات", "📚 الصفوف", "📅 جدول الحصص", "👨‍👩‍👧‍👦 أولياء الأمور"])
+# التحقق من الدخول
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL
+)
+""")
+cursor.execute("INSERT OR IGNORE INTO users (username, password) VALUES (?, ?)", ("admin", "admin123"))
+conn.commit()
 
----- دوال ----
+if "logged_in" not in st.session_state:
+    st.title("🔐 تسجيل الدخول")
+    username = st.text_input("اسم المستخدم")
+    password = st.text_input("كلمة المرور", type="password")
+    if st.button("تسجيل الدخول"):
+        cursor.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
+        user = cursor.fetchone()
+        if user:
+            st.session_state.logged_in = True
+            st.experimental_rerun()
+        else:
+            st.error("❌ اسم المستخدم أو كلمة المرور غير صحيحة")
+    st.stop()
 
-def get_students(): return pd.read_sql_query("SELECT * FROM students", conn)
+# --- إضافة طالب ---
+with st.expander("📥 إضافة طالب"):
+    name = st.text_input("اسم الطالب")
+    gender = st.selectbox("الجنس", ["ذكر", "أنثى"])
+    birth_date = st.date_input("تاريخ الميلاد")
+    class_name = st.text_input("الصف")
+    parent_contact = st.text_input("بريد ولي الأمر")
+    if st.button("📥 إضافة الطالب"):
+        cursor.execute("INSERT INTO students (name, gender, birth_date, class_name, parent_contact) VALUES (?, ?, ?, ?, ?)",
+                       (name, gender, birth_date.strftime("%Y-%m-%d"), class_name, parent_contact))
+        conn.commit()
+        st.success("✅ تم الإضافة")
 
-def add_student(student_id, name, email, class_name): cursor.execute("INSERT OR IGNORE INTO students (student_id, name, email, class_name) VALUES (?, ?, ?, ?)", (student_id, name, email, class_name)) conn.commit()
+# --- إدارة المعلمين ---
+with st.expander("👩‍🏫 إدارة المعلمين"):
+    teacher_name = st.text_input("اسم المعلم")
+    subject = st.text_input("المادة الدراسية")
+    if st.button("➕ إضافة معلم"):
+        cursor.execute("INSERT INTO teachers (name, subject) VALUES (?, ?)", (teacher_name, subject))
+        conn.commit()
+        st.success("✅ تم إضافة المعلم")
+    teachers_df = pd.read_sql("SELECT * FROM teachers", conn)
+    st.dataframe(teachers_df, use_container_width=True)
 
-def get_teachers(): return pd.read_sql_query("SELECT * FROM teachers", conn)
+# --- إدارة العلامات ---
+with st.expander("📊 إدارة العلامات"):
+    students = pd.read_sql("SELECT id, name FROM students", conn)
+    subjects = ["رياضيات", "علوم", "لغة عربية", "لغة إنجليزية"]
+    student_selected = st.selectbox("اختر الطالب", students["name"])
+    subject = st.selectbox("اختر المادة", subjects)
+    grade = st.number_input("أدخل العلامة", min_value=0.0, max_value=100.0)
+    student_id = students[students["name"] == student_selected]["id"].values[0]
+    if st.button("➕ حفظ العلامة"):
+        cursor.execute("INSERT INTO grades (student_id, subject, grade) VALUES (?, ?, ?)", (student_id, subject, grade))
+        conn.commit()
+        st.success("✅ تم حفظ العلامة")
+    df_grades = pd.read_sql("SELECT * FROM grades", conn)
+    st.dataframe(df_grades)
 
-def add_teacher(teacher_id, name, subject): cursor.execute("INSERT OR IGNORE INTO teachers (teacher_id, name, subject) VALUES (?, ?, ?)", (teacher_id, name, subject)) conn.commit()
+# --- إدارة جدول الحصص ---
+with st.expander("🗓️ جدول الحصص"):
+    class_name = st.text_input("الصف الدراسي")
+    day = st.selectbox("اليوم", ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس"])
+    subject = st.text_input("المادة")
+    time = st.text_input("الوقت (مثال: 09:00-10:00)")
+    if st.button("➕ إضافة الحصة"):
+        cursor.execute("INSERT INTO timetable (class_id, day, subject, time) VALUES ((SELECT id FROM classes WHERE class_name = ?), ?, ?, ?)", (class_name, day, subject, time))
+        conn.commit()
+        st.success("✅ تم إضافة الحصة")
+    timetable_df = pd.read_sql("SELECT * FROM timetable", conn)
+    st.dataframe(timetable_df)
 
-def get_grades(): return pd.read_sql_query("SELECT * FROM grades", conn)
+# --- تحميل التقارير ---
+with st.expander("📤 تحميل التقارير"):
+    df = pd.read_sql("SELECT * FROM students", conn)
+    csv = df.to_csv(index=False)
+    b64 = base64.b64encode(csv.encode()).decode()
+    href = f'<a href="data:file/csv;base64,{b64}" download="students_{datetime.today().date()}.csv">📥 تحميل تقرير الطلاب بصيغة CSV</a>'
+    st.markdown(href, unsafe_allow_html=True)
 
-def add_grade(student_id, subject, grade): cursor.execute("INSERT INTO grades (student_id, subject, grade) VALUES (?, ?, ?)", (student_id, subject, grade)) conn.commit()
+# --- إرسال إشعار بالبريد ---
+with st.expander("✉️ إرسال إشعار"):
+    students_df = pd.read_sql("SELECT name, parent_contact FROM students", conn)
+    selected_student = st.selectbox("اختر الطالب", students_df["name"])
+    parent_email = students_df[students_df["name"] == selected_student]["parent_contact"].values[0]
+    subject = st.text_input("الموضوع")
+    message = st.text_area("محتوى الرسالة")
+    sender_email = st.text_input("بريد المُرسل (Gmail)")
+    sender_pass = st.text_input("كلمة المرور أو App Password", type="password")
+    if st.button("📤 إرسال الإشعار"):
+        try:
+            msg = MIMEMultipart()
+            msg["From"] = sender_email
+            msg["To"] = parent_email
+            msg["Subject"] = subject
+            msg.attach(MIMEText(message, "plain"))
+            server = smtplib.SMTP("smtp.gmail.com", 587)
+            server.starttls()
+            server.login(sender_email, sender_pass)
+            server.sendmail(sender_email, parent_email, msg.as_string())
+            server.quit()
+            st.success("✅ تم إرسال الإشعار")
+        except Exception as e:
+            st.error(f"❌ خطأ: {e}")
 
-def get_classes(): return pd.read_sql_query("SELECT * FROM classes", conn)
+# --- صفحة حول النظام ---
+with st.expander("ℹ️ حول"):
+    st.markdown("""
+    **📘 نظام إدارة المدرسة** هو نظام تفاعلي تم تطويره باستخدام Streamlit وSQLite.
+    - يدعم إدارة الطلاب والمعلمين والمواد.
+    - إرسال الإشعارات لأولياء الأمور.
+    - تحميل التقارير وتحليل البيانات.
+    - تصميم متجاوب لجميع الشاشات.
 
-def add_class(class_id, class_name, grade_level): cursor.execute("INSERT OR IGNORE INTO classes (class_id, class_name, grade_level) VALUES (?, ?, ?)", (class_id, class_name, grade_level)) conn.commit()
+    تم تطويره بواسطة: `معاذ محمود` 🧑‍💻
+    """)
 
-def get_timetable(): return pd.read_sql_query("SELECT * FROM timetable", conn)
-
-def add_schedule(day, period, subject, class_name, teacher): cursor.execute("INSERT INTO timetable (day, period, subject, class_name, teacher) VALUES (?, ?, ?, ?, ?)", (day, period, subject, class_name, teacher)) conn.commit()
-
-def get_parents(): return pd.read_sql_query("SELECT * FROM parents", conn)
-
-def add_parent(parent_id, name, email): cursor.execute("INSERT OR IGNORE INTO parents (parent_id, name, email) VALUES (?, ?, ?)", (parent_id, name, email)) conn.commit()
-
-def link_parent_student(parent_id, student_id): cursor.execute("INSERT OR IGNORE INTO parent_student (parent_id, student_id) VALUES (?, ?)", (parent_id, student_id)) conn.commit()
-
-def get_children(parent_id): return pd.read_sql_query(f"SELECT s.* FROM students s JOIN parent_student ps ON s.student_id = ps.student_id WHERE ps.parent_id = '{parent_id}'", conn)
-
-def get_student_grades(student_id): return pd.read_sql_query(f"SELECT * FROM grades WHERE student_id = '{student_id}'", conn)
-
----- صفحات ----
-
-if page == "👨‍🎓 الطلاب": # الطلاب (كما هو سابقًا) pass
-
-elif page == "👨‍🏫 المعلمون": # المعلمون (كما هو سابقًا) pass
-
-elif page == "📝 العلامات": # العلامات (كما هو سابقًا) pass
-
-elif page == "📚 الصفوف": # الصفوف (كما هو سابقًا) pass
-
-elif page == "📅 جدول الحصص": # جدول الحصص (كما هو سابقًا) pass
-
-elif page == "👨‍👩‍👧‍👦 أولياء الأمور": st.title("👨‍👩‍👧‍👦 إدارة أولياء الأمور")
-
-with st.form("parent_form"):
-    parent_id = st.text_input("🆔 رقم ولي الأمر")
-    parent_name = st.text_input("👤 اسم ولي الأمر")
-    parent_email = st.text_input("📧 البريد الإلكتروني")
-    submit_parent = st.form_submit_button("📥 حفظ")
-
-    if submit_parent and parent_id and parent_name:
-        add_parent(parent_id, parent_name, parent_email)
-        st.success("✅ تم حفظ ولي الأمر")
-
-st.subheader("🔗 ربط ولي الأمر بطالب")
-parents_df = get_parents()
-students_df = get_students()
-parent_list = parents_df["parent_id"].tolist()
-student_list = students_df["student_id"].tolist()
-
-with st.form("link_form"):
-    selected_parent = st.selectbox("👨‍👩‍👧‍👦 اختر ولي أمر", parent_list)
-    selected_student = st.selectbox("👨‍🎓 اختر طالب", student_list)
-    submit_link = st.form_submit_button("🔗 ربط")
-
-    if submit_link:
-        link_parent_student(selected_parent, selected_student)
-        st.success("✅ تم الربط")
-
-st.subheader("📄 عرض معلومات ولي الأمر")
-selected_parent_view = st.selectbox("👤 اختر ولي أمر لعرض أطفاله", parent_list)
-children_df = get_children(selected_parent_view)
-st.write("🧒 الأبناء المسجلون:")
-st.dataframe(children_df)
-
-for i, row in children_df.iterrows():
-    st.markdown(f"### 📝 علامات الطالب: {row['name']}")
-    student_grades = get_student_grades(row['student_id'])
-    st.dataframe(student_grades)
-
+conn.close()
