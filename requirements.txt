@@ -1,5 +1,10 @@
 fpdf
 streamlit
-pandas
-openpyxl
+
+
 xlsxwriter
+
+pandas
+sqlite3
+openpyxl
+email-validator
