@@ -1,10 +1,4 @@
-fpdf
+
 streamlit
-
-
-xlsxwriter
-
 pandas
-sqlite3
 openpyxl
-email-validator
