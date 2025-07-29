@@ -1,0 +1,5 @@
+fpdf
+streamlit
+xlsxwriter
+pandas
+matplotlib
